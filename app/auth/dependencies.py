@@ -1,44 +1,46 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
-from app.auth.utils import decode_token
 from app.database import supabase
+import logging
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 
 async def get_current_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Get current authenticated admin user from JWT token (admin_users table)"""
+    """Get current authenticated admin user by validating Supabase session token"""
     token = credentials.credentials
-    payload = decode_token(token)
 
-    if payload is None:
+    try:
+        # Validate token with Supabase Auth
+        user_response = supabase.auth.get_user(token)
+
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user_id = str(user_response.user.id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token validation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
+            detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check that token was issued for an admin_user
-    if payload.get("user_type") != "admin_user":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions. Admin access required."
-        )
-
-    admin_id: str = payload.get("sub")
-    if admin_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials"
-        )
-
-    # Fetch admin from admin_users table
-    response = supabase.table("admin_users").select("*").eq("id", admin_id).execute()
+    # Check that user exists in admin_users table
+    response = supabase.table("admin_users").select("*").eq("id", user_id).execute()
 
     if not response.data:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Admin user not found"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions. Admin access required."
         )
 
     return response.data[0]

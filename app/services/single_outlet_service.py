@@ -11,6 +11,29 @@ class SingleOutletService:
     async def create(data: SingleOutletCreate, created_by: str = None) -> Dict:
         """Create a new single outlet with generated license key"""
 
+        # If chain_id provided, verify chain exists and inherit plan_id
+        if data.chain_id:
+            chain = supabase.table("chain_outlets").select("id, plan_id").eq(
+                "id", data.chain_id
+            ).execute()
+
+            if not chain.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid chain ID"
+                )
+
+            # Inherit plan_id from chain if not provided
+            if not data.plan_id:
+                data.plan_id = chain.data[0].get("plan_id")
+
+        # Ensure plan_id is present
+        if not data.plan_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="plan_id is required for standalone outlets"
+            )
+
         # Verify plan exists
         plan = supabase.table("plan_types").select("id").eq(
             "id", data.plan_id
@@ -21,18 +44,6 @@ class SingleOutletService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid plan ID"
             )
-
-        # If chain_id provided, verify chain exists
-        if data.chain_id:
-            chain = supabase.table("chain_outlets").select("id").eq(
-                "id", data.chain_id
-            ).execute()
-
-            if not chain.data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid chain ID"
-                )
 
         try:
             license_key = str(uuid.uuid4())

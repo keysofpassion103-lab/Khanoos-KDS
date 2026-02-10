@@ -13,7 +13,7 @@ class SingleOutletCreate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     pincode: Optional[str] = None
-    plan_id: str
+    plan_id: Optional[str] = None
     chain_id: Optional[str] = None
 
 

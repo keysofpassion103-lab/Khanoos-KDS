@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.config import settings
-from app.routers import admin_auth, admin_auth_v2, plan_types, chain_outlets, single_outlets, licenses, subscriptions, activity_logs
+from app.routers import (
+    admin_auth, admin_auth_v2, plan_types, chain_outlets, single_outlets,
+    licenses, subscriptions, activity_logs,
+    kds_menu, kds_orders, kds_kots, kds_sections, kds_inventory,
+)
 import logging
 
 # Configure logging
@@ -107,7 +111,11 @@ async def root():
             "Outlet license management",
             "Chain and single outlet support",
             "Subscription plan management",
-            "Activity audit logging"
+            "Activity audit logging",
+            "KDS - Menu management",
+            "KDS - Order & KOT management",
+            "KDS - Sections & Tables",
+            "KDS - Inventory & Recipe management",
         ]
     }
 
@@ -127,6 +135,13 @@ app.include_router(single_outlets.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(licenses.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(subscriptions.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(activity_logs.router, prefix=f"/api/{settings.API_VERSION}")
+
+# KDS Routers (Outlet user authenticated)
+app.include_router(kds_menu.router, prefix=f"/api/{settings.API_VERSION}")
+app.include_router(kds_orders.router, prefix=f"/api/{settings.API_VERSION}")
+app.include_router(kds_kots.router, prefix=f"/api/{settings.API_VERSION}")
+app.include_router(kds_sections.router, prefix=f"/api/{settings.API_VERSION}")
+app.include_router(kds_inventory.router, prefix=f"/api/{settings.API_VERSION}")
 
 # if __name__ == "__main__":
 #     # import uvicorn

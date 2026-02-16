@@ -1,9 +1,7 @@
 from typing import Dict
 from fastapi import HTTPException, status
-from datetime import timedelta
-from app.database import supabase
-from app.auth.utils import get_password_hash, verify_password, create_access_token
-from app.config import settings
+from app.database import get_fresh_supabase_client
+from app.auth.utils import get_password_hash
 from app.schemas.admin_user import AdminUserCreate, AdminUserLogin, AdminUserUpdate
 import logging
 
@@ -14,10 +12,13 @@ class AdminUserService:
 
     @staticmethod
     async def register(data: AdminUserCreate) -> Dict:
-        """Register a new admin user with Supabase Auth"""
+        """Register a new admin user in BOTH Supabase Auth AND admin_users table"""
+
+        # Fresh client for ALL operations - guarantees service_role context
+        db = get_fresh_supabase_client()
 
         # Check if email already exists
-        existing = supabase.table("admin_users").select("id").eq(
+        existing = db.table("admin_users").select("id").eq(
             "email", data.email
         ).execute()
 
@@ -28,14 +29,14 @@ class AdminUserService:
             )
 
         try:
-            logger.info(f"[ADMIN REGISTRATION] Starting registration for: {data.email}")
+            logger.info(f"[ADMIN REGISTER] Starting for: {data.email}")
 
-            # 1. Create user in Supabase Auth using admin method (bypasses RLS!)
-            logger.info(f"[STEP 1/2] Creating user in Supabase Auth...")
-            auth_response = supabase.auth.admin.create_user({
+            # STEP 1: Create user in Supabase Auth (visible in Dashboard > Authentication)
+            auth_client = get_fresh_supabase_client()
+            auth_response = auth_client.auth.admin.create_user({
                 "email": data.email,
                 "password": data.password,
-                "email_confirm": True,  # Auto-confirm email
+                "email_confirm": True,
                 "user_metadata": {
                     "full_name": data.full_name,
                     "phone": data.phone,
@@ -44,37 +45,34 @@ class AdminUserService:
             })
 
             if not auth_response.user:
-                logger.error(f"[FAILED] Could not create user in Supabase Auth")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to create auth user"
                 )
 
-            user_id = auth_response.user.id
-            logger.info(f"✅ [SUPABASE AUTH] User created with ID: {user_id}")
-            logger.info(f"   → User visible in Supabase Dashboard → Authentication → Users")
+            user_id = str(auth_response.user.id)
+            logger.info(f"[AUTH] Created in Supabase Auth: {user_id}")
 
-            # 2. Create entry in admin_users table with SAME ID
-            logger.info(f"[STEP 2/2] Creating admin profile in admin_users table with same ID...")
+            # STEP 2: Create in admin_users table with SAME ID
+            db2 = get_fresh_supabase_client()
             insert_data = {
-                "id": user_id,  # Use SAME ID as Supabase Auth!
+                "id": user_id,
                 "email": data.email,
-                "password_hash": get_password_hash(data.password),  # Keep for backup
+                "password_hash": get_password_hash(data.password),
                 "full_name": data.full_name,
                 "phone": data.phone
             }
 
-            response = supabase.table("admin_users").insert(insert_data).execute()
+            response = db2.table("admin_users").insert(insert_data).execute()
 
             if not response.data:
-                # Rollback: delete auth user if profile creation fails
-                logger.error(f"[FAILED] Could not create admin profile in database")
-                logger.info(f"[ROLLBACK] Deleting Supabase Auth user...")
+                # Rollback: delete auth user
+                logger.error(f"[FAILED] DB insert failed, rolling back auth user")
                 try:
-                    supabase.auth.admin.delete_user(user_id)
-                    logger.info(f"[ROLLBACK] Auth user deleted successfully")
-                except Exception as rollback_error:
-                    logger.error(f"[ROLLBACK FAILED] {rollback_error}")
+                    rollback_client = get_fresh_supabase_client()
+                    rollback_client.auth.admin.delete_user(user_id)
+                except Exception as e:
+                    logger.error(f"[ROLLBACK FAILED] {e}")
 
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -82,14 +80,7 @@ class AdminUserService:
                 )
 
             admin = response.data[0]
-            logger.info(f"✅ [DATABASE] Admin profile created with ID: {admin['id']}")
-            logger.info(f"   → Saved in admin_users table")
-            logger.info(f"   → Using SAME ID as Supabase Auth: {user_id}")
-            logger.info(f"")
-            logger.info(f"🎉 [SUCCESS] Admin registration complete!")
-            logger.info(f"   📧 Email: {data.email}")
-            logger.info(f"   🆔 User ID: {user_id} (same in both places)")
-            logger.info(f"   ✅ Saved in BOTH Supabase Auth AND admin_users table")
+            logger.info(f"[SUCCESS] Admin registered: {data.email} (ID: {user_id})")
 
             return {
                 "id": admin["id"],
@@ -97,12 +88,13 @@ class AdminUserService:
                 "full_name": admin["full_name"],
                 "phone": admin.get("phone"),
                 "created_at": admin["created_at"],
-                "message": "✅ Admin registered successfully! Saved in BOTH Supabase Auth AND admin_users table."
+                "message": "Admin registered successfully"
             }
 
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Registration error: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Registration failed: {str(e)}"
@@ -113,8 +105,9 @@ class AdminUserService:
         """Login admin user using Supabase Auth"""
 
         try:
-            # 1. Sign in with Supabase Auth
-            auth_response = supabase.auth.sign_in_with_password({
+            # Sign in with fresh client (never touches global state)
+            auth_client = get_fresh_supabase_client()
+            auth_response = auth_client.auth.sign_in_with_password({
                 "email": data.email,
                 "password": data.password
             })
@@ -125,9 +118,10 @@ class AdminUserService:
                     detail="Invalid email or password"
                 )
 
-            # 2. Get admin profile from admin_users table (using SAME ID)
-            admin_response = supabase.table("admin_users").select("*").eq(
-                "id", auth_response.user.id  # Use same ID!
+            # Get admin profile with fresh client
+            db = get_fresh_supabase_client()
+            admin_response = db.table("admin_users").select("*").eq(
+                "id", str(auth_response.user.id)
             ).execute()
 
             if not admin_response.data:
@@ -154,6 +148,7 @@ class AdminUserService:
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Login error: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Login failed: {str(e)}"
@@ -162,8 +157,8 @@ class AdminUserService:
     @staticmethod
     async def get_profile(admin_id: str) -> Dict:
         """Get admin user profile"""
-
-        response = supabase.table("admin_users").select(
+        db = get_fresh_supabase_client()
+        response = db.table("admin_users").select(
             "id, email, full_name, phone, created_at"
         ).eq("id", admin_id).execute()
 
@@ -187,7 +182,8 @@ class AdminUserService:
                 detail="No data provided for update"
             )
 
-        response = supabase.table("admin_users").update(
+        db = get_fresh_supabase_client()
+        response = db.table("admin_users").update(
             update_data
         ).eq("id", admin_id).execute()
 
@@ -211,8 +207,9 @@ class AdminUserService:
         """Change admin user password in Supabase Auth"""
 
         try:
-            # Fetch admin to get email
-            response = supabase.table("admin_users").select("email").eq(
+            # Fetch admin email
+            db = get_fresh_supabase_client()
+            response = db.table("admin_users").select("email").eq(
                 "id", admin_id
             ).execute()
 
@@ -224,9 +221,10 @@ class AdminUserService:
 
             admin_email = response.data[0]["email"]
 
-            # Verify old password by attempting to sign in
+            # Verify old password with fresh client
             try:
-                supabase.auth.sign_in_with_password({
+                verify_client = get_fresh_supabase_client()
+                verify_client.auth.sign_in_with_password({
                     "email": admin_email,
                     "password": old_password
                 })
@@ -236,26 +234,26 @@ class AdminUserService:
                     detail="Current password is incorrect"
                 )
 
-            # Update password in Supabase Auth
-            supabase.auth.admin.update_user_by_id(
+            # Update in Supabase Auth
+            admin_client = get_fresh_supabase_client()
+            admin_client.auth.admin.update_user_by_id(
                 admin_id,
                 {"password": new_password}
             )
 
-            # Also update backup password hash in admin_users table
-            new_hash = get_password_hash(new_password)
-            supabase.table("admin_users").update(
-                {"password_hash": new_hash}
+            # Update backup hash in DB
+            db2 = get_fresh_supabase_client()
+            db2.table("admin_users").update(
+                {"password_hash": get_password_hash(new_password)}
             ).eq("id", admin_id).execute()
 
-            logger.info(f"✅ Password changed for admin: {admin_email}")
-            logger.info(f"   → Updated in BOTH Supabase Auth AND admin_users table")
-
+            logger.info(f"Password changed for admin: {admin_email}")
             return {"message": "Password changed successfully"}
 
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Password change error: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Password change failed: {str(e)}"

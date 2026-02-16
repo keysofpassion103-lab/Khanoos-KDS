@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from app.schemas.license_key import (
-    LicenseKeyCreate, LicenseVerifyRequest, LicenseAuthRequest, OutletActivationRequest, OutletUserSignupRequest
+    LicenseKeyCreate, LicenseVerifyRequest, LicenseAuthRequest,
+    OutletActivationRequest, OutletUserSignupRequest, OutletUserLoginRequest
 )
 from app.schemas.response import APIResponse
 from app.services.license_service import LicenseService
@@ -76,6 +77,24 @@ async def outlet_user_signup(data: OutletUserSignupRequest):
     return APIResponse(
         success=True,
         message=result.get("message", "Outlet user registered successfully"),
+        data=result
+    )
+
+
+@router.post("/outlet-login", response_model=APIResponse)
+async def outlet_user_login(data: OutletUserLoginRequest):
+    """
+    Login outlet user with email and password (Public)
+
+    After first-time signup with license key, outlet users login
+    with just email and password. Returns access token and outlet info.
+    """
+
+    result = await LicenseService.login_outlet_user(data)
+
+    return APIResponse(
+        success=True,
+        message="Login successful",
         data=result
     )
 

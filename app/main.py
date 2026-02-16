@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.config import settings
 from app.routers import (
-    admin_auth, admin_auth_v2, plan_types, chain_outlets, single_outlets,
+    admin_auth, plan_types, chain_outlets, single_outlets,
     licenses, subscriptions, activity_logs,
     kds_menu, kds_orders, kds_kots, kds_sections, kds_inventory,
 )
@@ -127,8 +127,7 @@ async def health_check():
     }
 
 # Include routers
-app.include_router(admin_auth.router, prefix=f"/api/{settings.API_VERSION}")  # V1 (Old system - bcrypt)
-app.include_router(admin_auth_v2.router, prefix=f"/api/{settings.API_VERSION}")  # V2 (New system - Supabase Auth)
+app.include_router(admin_auth.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(plan_types.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(chain_outlets.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(single_outlets.router, prefix=f"/api/{settings.API_VERSION}")

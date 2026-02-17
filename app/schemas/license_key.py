@@ -63,7 +63,7 @@ class OutletUserSignupRequest(BaseModel):
     license_key: str
     email: str
     password: str = Field(min_length=8, max_length=100)
-    full_name: str = Field(min_length=2, max_length=255)
+    full_name: Optional[str] = None
 
 
 class OutletUserLoginRequest(BaseModel):

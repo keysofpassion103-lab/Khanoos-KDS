@@ -3,6 +3,7 @@ from typing import List, Dict
 from fastapi import HTTPException, status
 from app.database import supabase
 from app.schemas.chain_outlet import ChainOutletCreate, ChainOutletUpdate
+from app.services.activity_log_service import ActivityLogService
 
 
 class ChainOutletService:
@@ -49,6 +50,13 @@ class ChainOutletService:
                 "chain_id": chain["id"],
                 "is_used": False
             }).execute()
+
+            await ActivityLogService.log_activity(
+                action="chain_created",
+                chain_id=chain["id"],
+                user_id=created_by,
+                details={"chain_name": data.chain_name}
+            )
 
             return chain
 
@@ -105,6 +113,12 @@ class ChainOutletService:
                 detail="Chain outlet not found"
             )
 
+        await ActivityLogService.log_activity(
+            action="chain_updated",
+            chain_id=chain_id,
+            details={"updated_fields": list(update_data.keys())}
+        )
+
         return response.data[0]
 
     @staticmethod
@@ -120,6 +134,11 @@ class ChainOutletService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Chain outlet not found"
             )
+
+        await ActivityLogService.log_activity(
+            action="chain_deleted",
+            chain_id=chain_id
+        )
 
     @staticmethod
     async def get_outlets(chain_id: str) -> List[Dict]:

@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from app.config import settings
 from app.routers import (
     admin_auth, plan_types, chain_outlets, single_outlets,
-    licenses, subscriptions, activity_logs,
+    licenses, subscriptions, activity_logs, app_auth,
     kds_menu, kds_orders, kds_kots, kds_sections, kds_inventory,
 )
 import logging
@@ -99,6 +99,12 @@ async def general_exception_handler(request: Request, exc: Exception):
         }
     )
 
+# Startup validation
+@app.on_event("startup")
+async def startup_event():
+    settings.validate_required()
+    logger.info("Khanoos API started successfully")
+
 # Health check and info endpoints
 @app.get("/")
 async def root():
@@ -134,6 +140,9 @@ app.include_router(single_outlets.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(licenses.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(subscriptions.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(activity_logs.router, prefix=f"/api/{settings.API_VERSION}")
+
+# App Auth (POS/Kitchen app endpoints)
+app.include_router(app_auth.router, prefix=f"/api/{settings.API_VERSION}")
 
 # KDS Routers (Outlet user authenticated)
 app.include_router(kds_menu.router, prefix=f"/api/{settings.API_VERSION}")

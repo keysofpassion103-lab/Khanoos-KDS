@@ -1,6 +1,6 @@
 from typing import List, Dict
 from fastapi import HTTPException, status
-from app.database import get_fresh_supabase_client
+from app.database import get_fresh_supabase_client, get_anon_supabase_client
 from app.schemas.license_key import (
     LicenseKeyCreate,
     LicenseVerifyRequest,
@@ -226,6 +226,8 @@ class LicenseService:
 
             outlet_id = verify_response.get("outlet_id")
             outlet_name = verify_response.get("outlet_name")
+            owner_name = verify_response.get("owner_name", "")
+            full_name = data.full_name or owner_name
             logger.info(f"License verified for outlet: {outlet_name} ({outlet_id})")
 
             # 2. Create user in Supabase Auth using admin method (fresh client)
@@ -236,7 +238,7 @@ class LicenseService:
                 "password": data.password,
                 "email_confirm": True,
                 "user_metadata": {
-                    "full_name": data.full_name,
+                    "full_name": full_name,
                     "user_type": "outlet_owner",
                     "outlet_id": outlet_id
                 }
@@ -276,7 +278,7 @@ class LicenseService:
                 "user": {
                     "id": str(auth_response.user.id),
                     "email": data.email,
-                    "full_name": data.full_name
+                    "full_name": full_name
                 },
                 "outlet": {
                     "id": outlet_id,
@@ -301,9 +303,10 @@ class LicenseService:
         try:
             logger.info(f"[OUTLET LOGIN] Attempting login for: {data.email}")
 
-            # 1. Sign in with Supabase Auth using a fresh client
-            fresh_client = get_fresh_supabase_client()
-            auth_response = fresh_client.auth.sign_in_with_password({
+            # 1. Sign in with Supabase Auth using the anon key client
+            # sign_in_with_password must NOT use the service role key
+            anon_client = get_anon_supabase_client()
+            auth_response = anon_client.auth.sign_in_with_password({
                 "email": data.email,
                 "password": data.password
             })

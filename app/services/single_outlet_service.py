@@ -3,6 +3,7 @@ from typing import List, Dict
 from fastapi import HTTPException, status
 from app.database import supabase
 from app.schemas.single_outlet import SingleOutletCreate, SingleOutletUpdate
+from app.services.activity_log_service import ActivityLogService
 
 
 class SingleOutletService:
@@ -75,6 +76,13 @@ class SingleOutletService:
                 "is_used": False
             }).execute()
 
+            await ActivityLogService.log_activity(
+                action="outlet_created",
+                outlet_id=outlet["id"],
+                user_id=created_by,
+                details={"outlet_name": data.outlet_name}
+            )
+
             return outlet
 
         except HTTPException:
@@ -130,6 +138,12 @@ class SingleOutletService:
                 detail="Outlet not found"
             )
 
+        await ActivityLogService.log_activity(
+            action="outlet_updated",
+            outlet_id=outlet_id,
+            details={"updated_fields": list(update_data.keys())}
+        )
+
         return response.data[0]
 
     @staticmethod
@@ -145,6 +159,11 @@ class SingleOutletService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Outlet not found"
             )
+
+        await ActivityLogService.log_activity(
+            action="outlet_deleted",
+            outlet_id=outlet_id
+        )
 
     @staticmethod
     async def check_status(outlet_id: str) -> Dict:

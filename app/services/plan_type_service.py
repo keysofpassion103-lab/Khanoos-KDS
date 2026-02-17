@@ -2,6 +2,7 @@ from typing import List, Dict
 from fastapi import HTTPException, status
 from app.database import supabase
 from app.schemas.plan_type import PlanTypeCreate, PlanTypeUpdate
+from app.services.activity_log_service import ActivityLogService
 
 
 class PlanTypeService:
@@ -34,7 +35,13 @@ class PlanTypeService:
                 detail="Failed to create plan type"
             )
 
-        return response.data[0]
+        plan = response.data[0]
+        await ActivityLogService.log_activity(
+            action="plan_created",
+            details={"plan_name": data.name, "plan_id": plan["id"]}
+        )
+
+        return plan
 
     @staticmethod
     async def get_all() -> List[Dict]:
@@ -94,6 +101,11 @@ class PlanTypeService:
                 detail="Plan type not found"
             )
 
+        await ActivityLogService.log_activity(
+            action="plan_updated",
+            details={"plan_id": plan_id, "updated_fields": list(update_data.keys())}
+        )
+
         return response.data[0]
 
     @staticmethod
@@ -109,3 +121,8 @@ class PlanTypeService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Plan type not found"
             )
+
+        await ActivityLogService.log_activity(
+            action="plan_deleted",
+            details={"plan_id": plan_id}
+        )

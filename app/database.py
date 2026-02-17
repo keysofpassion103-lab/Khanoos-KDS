@@ -5,8 +5,12 @@ def get_supabase_client() -> Client:
     """Get Supabase client with service role key for admin operations"""
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
 
-def get_supabase_user_client() -> Client:
-    """Get Supabase client with anon key for user operations"""
+def get_anon_supabase_client() -> Client:
+    """Create a Supabase client with the anon/public key.
+
+    Use this for user-facing auth operations like sign_in_with_password.
+    The service role key must NOT be used for these calls.
+    """
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 def get_fresh_supabase_client() -> Client:
@@ -18,6 +22,5 @@ def get_fresh_supabase_client() -> Client:
     """
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
 
-# Initialize clients
+# Initialize global client for non-auth operations
 supabase: Client = get_supabase_client()
-supabase_user: Client = get_supabase_user_client()

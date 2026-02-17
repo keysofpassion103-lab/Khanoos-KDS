@@ -206,29 +206,50 @@ class LicenseService:
         try:
             logger.info(f"[OUTLET SIGNUP] Starting signup for: {data.email}")
 
-            # 1. Verify license key is valid
-            logger.info(f"[STEP 1/4] Verifying license key...")
-            verify_response = await LicenseService.verify_license_for_signup(
-                LicenseVerifyRequest(license_key=data.license_key, email=data.email)
-            )
+            db = get_fresh_supabase_client()
 
-            if not verify_response.get("valid"):
+            # 1. Look up license key directly — no email-matching required
+            logger.info(f"[STEP 1/4] Verifying license key...")
+            lic_resp = db.table("license_keys").select(
+                "id, license_key, outlet_id, is_used"
+            ).eq("license_key", data.license_key).execute()
+
+            if not lic_resp.data:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=verify_response.get("message", "Invalid license key")
+                    detail="Invalid license key"
                 )
 
-            # Extract outlet info — present in both fresh and already_used cases
-            outlet_id = verify_response.get("outlet_id")
-            outlet_name = verify_response.get("outlet_name")
-            owner_name = verify_response.get("owner_name", "")
+            license_row = lic_resp.data[0]
+            outlet_id = license_row.get("outlet_id")
+            already_used = license_row.get("is_used", False)
+
+            if not outlet_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="License key is not linked to any outlet"
+                )
+
+            # 2. Get outlet details
+            outlet_resp = db.table("single_outlets").select(
+                "id, outlet_name, owner_name"
+            ).eq("id", outlet_id).execute()
+
+            if not outlet_resp.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Outlet not found for this license key"
+                )
+
+            outlet = outlet_resp.data[0]
+            outlet_name = outlet.get("outlet_name", "")
+            owner_name = outlet.get("owner_name", "")
             full_name = data.full_name or owner_name
-            already_used = verify_response.get("already_used", False)
 
             logger.info(f"License verified for outlet: {outlet_name} ({outlet_id}), already_used={already_used}")
 
-            # 2. Create user in Supabase Auth using admin method (fresh client)
-            logger.info(f"[STEP 2/4] Creating user in Supabase Auth...")
+            # 3. Create user in Supabase Auth
+            logger.info(f"[STEP 3/4] Creating user in Supabase Auth...")
             auth_client = get_fresh_supabase_client()
             try:
                 auth_response = auth_client.auth.admin.create_user({
@@ -243,7 +264,6 @@ class LicenseService:
                 })
             except Exception as auth_err:
                 err_msg = str(auth_err).lower()
-                # User already exists in Supabase Auth — they should just login
                 if "already registered" in err_msg or "already exists" in err_msg or "email address is already" in err_msg:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -265,23 +285,22 @@ class LicenseService:
             fresh_client = get_fresh_supabase_client()
 
             if not already_used:
-                # 3. Activate outlet (only needed if not already activated)
-                logger.info(f"[STEP 3/4] Activating outlet...")
+                # 4. Activate outlet and mark license used
+                logger.info(f"[STEP 4/4] Activating outlet and marking license used...")
                 fresh_client.table("single_outlets").update({
                     "is_active": True,
                     "license_key_used": True
                 }).eq("id", outlet_id).execute()
-                logger.info(f"Outlet activated: {outlet_id}")
 
-                # 4. Mark license as used
-                logger.info(f"[STEP 4/4] Marking license as used...")
                 fresh_client.table("license_keys").update({
                     "is_used": True,
                     "used_by": data.email,
                     "used_at": datetime.now(timezone.utc).isoformat()
                 }).eq("license_key", data.license_key).execute()
+
+                logger.info(f"Outlet activated: {outlet_id}")
             else:
-                logger.info(f"[SKIP 3-4] Outlet already active, skipping activation steps")
+                logger.info(f"[SKIP 4] License already used, outlet already active")
 
             logger.info(f"[SUCCESS] Outlet user signup complete for: {data.email}")
 

@@ -73,6 +73,10 @@ async def outlet_user_signup(data: OutletUserSignupRequest):
     and cases where the account already exists (returns token either way).
     """
 
+    if not data.email:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(status_code=400, detail="Email is required")
+
     auth_data = OutletAuthRequest(
         license_key=data.license_key,
         email=data.email,

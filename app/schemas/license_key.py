@@ -61,7 +61,7 @@ class OutletActivationRequest(BaseModel):
 class OutletUserSignupRequest(BaseModel):
     """Outlet user signup with license key and password"""
     license_key: str
-    email: str
+    email: EmailStr
     password: str = Field(min_length=8, max_length=100)
     full_name: Optional[str] = None
 

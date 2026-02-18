@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, status
 from app.schemas.license_key import (
     LicenseKeyCreate, LicenseVerifyRequest, LicenseAuthRequest,
-    OutletActivationRequest, OutletUserSignupRequest, OutletUserLoginRequest
+    OutletActivationRequest, OutletUserSignupRequest, OutletUserLoginRequest,
+    OutletAuthRequest,
 )
 from app.schemas.response import APIResponse
 from app.services.license_service import LicenseService
@@ -95,6 +96,26 @@ async def outlet_user_login(data: OutletUserLoginRequest):
     return APIResponse(
         success=True,
         message="Login successful",
+        data=result
+    )
+
+
+@router.post("/outlet-auth", response_model=APIResponse)
+async def outlet_auth(data: OutletAuthRequest):
+    """
+    Unified outlet authentication (Public)
+
+    Single endpoint for both first-time registration and returning login.
+    Provide license_key + email + password every time.
+    - First use: creates account, activates outlet, returns token
+    - Returning use: logs in directly, returns token
+    """
+
+    result = await LicenseService.outlet_authenticate(data)
+
+    return APIResponse(
+        success=True,
+        message="Authentication successful",
         data=result
     )
 

@@ -7,7 +7,8 @@ from app.schemas.license_key import (
     LicenseAuthRequest,
     OutletActivationRequest,
     OutletUserSignupRequest,
-    OutletUserLoginRequest
+    OutletUserLoginRequest,
+    OutletAuthRequest,
 )
 from datetime import datetime, timezone
 import logging
@@ -415,8 +416,170 @@ class LicenseService:
         except HTTPException:
             raise
         except Exception as e:
+            err_msg = str(e).lower()
+            if "invalid login credentials" in err_msg or "invalid_credentials" in err_msg:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid email or password"
+                )
             logger.error(f"Outlet login error: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Login failed: {str(e)}"
+            )
+
+    @staticmethod
+    async def outlet_authenticate(data: OutletAuthRequest) -> Dict:
+        """
+        Single endpoint: register-or-login.
+        1. Validate license key → get outlet
+        2. Create Supabase Auth user (skip if already exists)
+        3. Sign in with email + password
+        4. Return token + outlet info
+        """
+        try:
+            logger.info(f"[OUTLET AUTH] Starting for: {data.email}")
+
+            db = get_fresh_supabase_client()
+
+            # Step 1: Validate license key → get outlet_id
+            lic_resp = db.table("license_keys").select(
+                "id, outlet_id, is_used"
+            ).eq("license_key", data.license_key).execute()
+
+            if not lic_resp.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid license key"
+                )
+
+            license_row = lic_resp.data[0]
+            outlet_id = license_row.get("outlet_id")
+            already_used = license_row.get("is_used", False)
+
+            if not outlet_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="License key is not linked to any outlet"
+                )
+
+            # Step 2: Get outlet details
+            outlet_resp = db.table("single_outlets").select(
+                "id, outlet_name, owner_name, is_active, plan_end_date"
+            ).eq("id", outlet_id).execute()
+
+            if not outlet_resp.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Outlet not found for this license key"
+                )
+
+            outlet = outlet_resp.data[0]
+            outlet_name = outlet.get("outlet_name", "")
+            full_name = data.full_name or outlet.get("owner_name", "")
+
+            # Step 3: Create Supabase Auth user (idempotent — skip if already exists)
+            auth_client = get_fresh_supabase_client()
+            user_created = False
+            try:
+                auth_response = auth_client.auth.admin.create_user({
+                    "email": data.email,
+                    "password": data.password,
+                    "email_confirm": True,
+                    "user_metadata": {
+                        "full_name": full_name,
+                        "user_type": "outlet_owner",
+                        "outlet_id": outlet_id
+                    }
+                })
+                if auth_response.user:
+                    user_created = True
+                    logger.info(f"[AUTH] New user created: {auth_response.user.id}")
+            except Exception as create_err:
+                err_lower = str(create_err).lower()
+                if "already registered" in err_lower or "already exists" in err_lower or "email address is already" in err_lower:
+                    logger.info(f"[AUTH] User already exists, proceeding to login")
+                else:
+                    logger.error(f"[AUTH] create_user error: {create_err}", exc_info=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to create account: {str(create_err)}"
+                    )
+
+            # Step 4: Activate outlet + mark license used (only on first registration)
+            if user_created and not already_used:
+                fresh = get_fresh_supabase_client()
+                fresh.table("single_outlets").update({
+                    "is_active": True,
+                    "license_key_used": True
+                }).eq("id", outlet_id).execute()
+
+                fresh.table("license_keys").update({
+                    "is_used": True,
+                    "used_by": data.email,
+                    "used_at": datetime.now(timezone.utc).isoformat()
+                }).eq("license_key", data.license_key).execute()
+
+                logger.info(f"[AUTH] Outlet activated: {outlet_id}")
+
+            # Step 5: Sign in with email + password
+            anon_client = get_anon_supabase_client()
+            try:
+                login_response = anon_client.auth.sign_in_with_password({
+                    "email": data.email,
+                    "password": data.password
+                })
+            except Exception as login_err:
+                err_lower = str(login_err).lower()
+                if "invalid login credentials" in err_lower or "invalid_credentials" in err_lower:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Incorrect password. If you registered before, use your original password."
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Login failed: {str(login_err)}"
+                )
+
+            if not login_response.user or not login_response.session:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authentication failed"
+                )
+
+            # Step 6: Re-fetch outlet to get latest is_active state
+            outlet_now = get_fresh_supabase_client().table("single_outlets").select(
+                "id, outlet_name, outlet_type, is_active, plan_end_date"
+            ).eq("id", outlet_id).execute()
+
+            outlet_data = outlet_now.data[0] if outlet_now.data else outlet
+
+            logger.info(f"[SUCCESS] Outlet auth for: {data.email}, outlet: {outlet_id}")
+
+            return {
+                "user": {
+                    "id": str(login_response.user.id),
+                    "email": login_response.user.email,
+                    "full_name": login_response.user.user_metadata.get("full_name", full_name),
+                    "user_type": "outlet_owner"
+                },
+                "outlet": {
+                    "id": outlet_data.get("id", outlet_id),
+                    "outlet_name": outlet_data.get("outlet_name", outlet_name),
+                    "outlet_type": outlet_data.get("outlet_type", "single"),
+                    "is_active": outlet_data.get("is_active", True),
+                    "plan_end_date": outlet_data.get("plan_end_date")
+                },
+                "access_token": login_response.session.access_token,
+                "refresh_token": login_response.session.refresh_token,
+                "token_type": "bearer"
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Outlet auth error: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Authentication failed: {str(e)}"
             )

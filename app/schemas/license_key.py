@@ -74,7 +74,7 @@ class OutletUserLoginRequest(BaseModel):
 
 class OutletAuthRequest(BaseModel):
     """Single endpoint: register-or-login with license key + email + password"""
-    license_key: str
+    license_key: str = Field(min_length=1, description="License key must not be empty")
     email: EmailStr
     password: str = Field(min_length=8, max_length=100)
     full_name: Optional[str] = None

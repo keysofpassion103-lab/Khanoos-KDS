@@ -69,15 +69,21 @@ async def outlet_user_signup(data: OutletUserSignupRequest):
     """
     Outlet user signup with license key (Public)
 
-    Creates user in Supabase Auth and activates license.
-    User will appear in Supabase Dashboard → Authentication → Users
+    Delegates to the unified auth flow — handles both new registrations
+    and cases where the account already exists (returns token either way).
     """
 
-    result = await LicenseService.signup_outlet_user(data)
+    auth_data = OutletAuthRequest(
+        license_key=data.license_key,
+        email=data.email,
+        password=data.password,
+        full_name=data.full_name,
+    )
+    result = await LicenseService.outlet_authenticate(auth_data)
 
     return APIResponse(
         success=True,
-        message=result.get("message", "Outlet user registered successfully"),
+        message="Outlet user registered successfully",
         data=result
     )
 

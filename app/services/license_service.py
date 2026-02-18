@@ -63,31 +63,17 @@ class LicenseService:
 
     @staticmethod
     async def verify_license_for_signup(data: LicenseVerifyRequest) -> Dict:
-        """Verify a license key for signup via RPC"""
+        """Verify a license key for signup — email no longer required"""
 
         try:
             db = get_fresh_supabase_client()
-            response = db.rpc(
-                "verify_license_for_signup",
-                {
-                    "p_license_key": data.license_key,
-                    "p_email": data.email
-                }
-            ).execute()
 
-            if response.data:
-                result = response.data
-                if isinstance(result, list) and len(result) > 0:
-                    result = result[0]
-                return {
-                    "valid": result.get("valid", False),
-                    "message": result.get("message", "Verification complete"),
-                    "outlet_id": result.get("outlet_id"),
-                    "outlet_name": result.get("outlet_name"),
-                    "owner_name": result.get("owner_name"),
-                    "already_used": result.get("already_used", False)
-                }
-            else:
+            # Look up license by key only (no email match required)
+            lic_resp = db.table("license_keys").select(
+                "id, outlet_id, is_used"
+            ).eq("license_key", data.license_key).execute()
+
+            if not lic_resp.data:
                 return {
                     "valid": False,
                     "message": "Invalid license key",
@@ -96,6 +82,44 @@ class LicenseService:
                     "owner_name": None,
                     "already_used": False
                 }
+
+            lic = lic_resp.data[0]
+            outlet_id = lic.get("outlet_id")
+            already_used = lic.get("is_used", False)
+
+            if not outlet_id:
+                return {
+                    "valid": False,
+                    "message": "License key is not linked to any outlet",
+                    "outlet_id": None,
+                    "outlet_name": None,
+                    "owner_name": None,
+                    "already_used": False
+                }
+
+            outlet_resp = db.table("single_outlets").select(
+                "id, outlet_name, owner_name"
+            ).eq("id", outlet_id).execute()
+
+            if not outlet_resp.data:
+                return {
+                    "valid": False,
+                    "message": "Outlet not found",
+                    "outlet_id": None,
+                    "outlet_name": None,
+                    "owner_name": None,
+                    "already_used": False
+                }
+
+            outlet = outlet_resp.data[0]
+            return {
+                "valid": True,
+                "message": "License already activated" if already_used else "Valid license key",
+                "outlet_id": str(outlet["id"]),
+                "outlet_name": outlet.get("outlet_name"),
+                "owner_name": outlet.get("owner_name"),
+                "already_used": already_used
+            }
 
         except Exception as e:
             raise HTTPException(

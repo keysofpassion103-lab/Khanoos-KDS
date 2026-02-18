@@ -25,7 +25,7 @@ class LicenseKeyResponse(BaseModel):
 
 class LicenseVerifyRequest(BaseModel):
     license_key: str
-    email: str
+    email: Optional[str] = None
 
 
 class LicenseAuthRequest(BaseModel):

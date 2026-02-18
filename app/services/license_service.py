@@ -19,6 +19,41 @@ logger = logging.getLogger(__name__)
 class LicenseService:
 
     @staticmethod
+    def _resolve_license_key(db, license_key: str):
+        """
+        Find outlet_id + already_used for a license key.
+        Checks license_keys table first; falls back to single_outlets.license_key column.
+        Returns (outlet_id: str, already_used: bool) or raises HTTPException(400).
+        """
+        lic_resp = db.table("license_keys").select(
+            "id, outlet_id, is_used"
+        ).eq("license_key", license_key).execute()
+
+        if lic_resp.data:
+            row = lic_resp.data[0]
+            outlet_id = row.get("outlet_id")
+            if not outlet_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="License key is not linked to any outlet"
+                )
+            return str(outlet_id), bool(row.get("is_used", False))
+
+        # Fallback: older outlets may only have license_key stored in single_outlets
+        outlet_resp = db.table("single_outlets").select(
+            "id, license_key_used"
+        ).eq("license_key", license_key).execute()
+
+        if not outlet_resp.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid license key"
+            )
+
+        o = outlet_resp.data[0]
+        return str(o["id"]), bool(o.get("license_key_used", False))
+
+    @staticmethod
     async def create(data: LicenseKeyCreate) -> Dict:
         """Create a new license key entry"""
 
@@ -68,29 +103,13 @@ class LicenseService:
         try:
             db = get_fresh_supabase_client()
 
-            # Look up license by key only (no email match required)
-            lic_resp = db.table("license_keys").select(
-                "id, outlet_id, is_used"
-            ).eq("license_key", data.license_key).execute()
-
-            if not lic_resp.data:
+            # Resolve license key — checks license_keys table, falls back to single_outlets
+            try:
+                outlet_id, already_used = LicenseService._resolve_license_key(db, data.license_key)
+            except HTTPException:
                 return {
                     "valid": False,
                     "message": "Invalid license key",
-                    "outlet_id": None,
-                    "outlet_name": None,
-                    "owner_name": None,
-                    "already_used": False
-                }
-
-            lic = lic_resp.data[0]
-            outlet_id = lic.get("outlet_id")
-            already_used = lic.get("is_used", False)
-
-            if not outlet_id:
-                return {
-                    "valid": False,
-                    "message": "License key is not linked to any outlet",
                     "outlet_id": None,
                     "outlet_name": None,
                     "owner_name": None,
@@ -233,27 +252,9 @@ class LicenseService:
 
             db = get_fresh_supabase_client()
 
-            # 1. Look up license key directly — no email-matching required
+            # 1. Resolve license key — checks license_keys, falls back to single_outlets
             logger.info(f"[STEP 1/4] Verifying license key...")
-            lic_resp = db.table("license_keys").select(
-                "id, license_key, outlet_id, is_used"
-            ).eq("license_key", data.license_key).execute()
-
-            if not lic_resp.data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid license key"
-                )
-
-            license_row = lic_resp.data[0]
-            outlet_id = license_row.get("outlet_id")
-            already_used = license_row.get("is_used", False)
-
-            if not outlet_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="License key is not linked to any outlet"
-                )
+            outlet_id, already_used = LicenseService._resolve_license_key(db, data.license_key)
 
             # 2. Get outlet details
             outlet_resp = db.table("single_outlets").select(
@@ -467,25 +468,8 @@ class LicenseService:
             db = get_fresh_supabase_client()
 
             # Step 1: Validate license key → get outlet_id
-            lic_resp = db.table("license_keys").select(
-                "id, outlet_id, is_used"
-            ).eq("license_key", data.license_key).execute()
-
-            if not lic_resp.data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid license key"
-                )
-
-            license_row = lic_resp.data[0]
-            outlet_id = license_row.get("outlet_id")
-            already_used = license_row.get("is_used", False)
-
-            if not outlet_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="License key is not linked to any outlet"
-                )
+            # Checks license_keys table; falls back to single_outlets.license_key column
+            outlet_id, already_used = LicenseService._resolve_license_key(db, data.license_key)
 
             # Step 2: Get outlet details
             outlet_resp = db.table("single_outlets").select(

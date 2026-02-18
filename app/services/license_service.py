@@ -22,36 +22,56 @@ class LicenseService:
     def _resolve_license_key(db, license_key: str):
         """
         Find outlet_id + already_used for a license key.
-        Checks license_keys table first; falls back to single_outlets.license_key column.
+        Strategy:
+          1. Check single_outlets.license_key (admin-assigned key — always exists)
+          2. If not found there, check license_keys table (API-generated key)
         Returns (outlet_id: str, already_used: bool) or raises HTTPException(400).
         """
-        lic_resp = db.table("license_keys").select(
-            "id, outlet_id, is_used"
-        ).eq("license_key", license_key).execute()
+        trimmed = license_key.strip()
+        logger.info(f"[LICENSE] Resolving key: {trimmed[:8]}... (len={len(trimmed)})")
+
+        # Primary: single_outlets has license_key for EVERY outlet
+        try:
+            outlet_resp = db.table("single_outlets").select(
+                "id, license_key_used"
+            ).eq("license_key", trimmed).execute()
+            logger.info(f"[LICENSE] single_outlets lookup: {len(outlet_resp.data or [])} rows")
+        except Exception as e:
+            logger.warning(f"[LICENSE] single_outlets query error: {e}")
+            outlet_resp = type("R", (), {"data": []})()
+
+        if outlet_resp.data:
+            o = outlet_resp.data[0]
+            logger.info(f"[LICENSE] Found in single_outlets: outlet_id={o['id']}, used={o.get('license_key_used')}")
+            return str(o["id"]), bool(o.get("license_key_used", False))
+
+        # Secondary fallback: license_keys table (created via API)
+        try:
+            lic_resp = db.table("license_keys").select(
+                "id, outlet_id, is_used"
+            ).eq("license_key", trimmed).execute()
+            logger.info(f"[LICENSE] license_keys lookup: {len(lic_resp.data or [])} rows")
+        except Exception as e:
+            logger.warning(f"[LICENSE] license_keys query error: {e}")
+            lic_resp = type("R", (), {"data": []})()
 
         if lic_resp.data:
             row = lic_resp.data[0]
             outlet_id = row.get("outlet_id")
             if not outlet_id:
+                logger.warning(f"[LICENSE] Key found in license_keys but no outlet_id")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="License key is not linked to any outlet"
                 )
+            logger.info(f"[LICENSE] Found in license_keys: outlet_id={outlet_id}, used={row.get('is_used')}")
             return str(outlet_id), bool(row.get("is_used", False))
 
-        # Fallback: older outlets may only have license_key stored in single_outlets
-        outlet_resp = db.table("single_outlets").select(
-            "id, license_key_used"
-        ).eq("license_key", license_key).execute()
-
-        if not outlet_resp.data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid license key"
-            )
-
-        o = outlet_resp.data[0]
-        return str(o["id"]), bool(o.get("license_key_used", False))
+        logger.warning(f"[LICENSE] Key not found in ANY table: {trimmed[:8]}...")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid license key. Please check the key and try again."
+        )
 
     @staticmethod
     async def create(data: LicenseKeyCreate) -> Dict:
@@ -463,12 +483,11 @@ class LicenseService:
         4. Return token + outlet info
         """
         try:
-            logger.info(f"[OUTLET AUTH] Starting for: {data.email}")
+            logger.warning(f"[OUTLET AUTH] ▶ email={data.email} key={data.license_key[:8]}...")
 
             db = get_fresh_supabase_client()
 
             # Step 1: Validate license key → get outlet_id
-            # Checks license_keys table; falls back to single_outlets.license_key column
             outlet_id, already_used = LicenseService._resolve_license_key(db, data.license_key)
 
             # Step 2: Get outlet details

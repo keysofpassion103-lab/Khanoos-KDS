@@ -10,6 +10,13 @@ from app.routers import (
 )
 import logging
 
+# Force INFO level so all application logs appear in Render/production logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    force=True,
+)
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -103,7 +110,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     settings.validate_required()
-    logger.info("Khanoos API started successfully")
+    logger.warning("✅ Khanoos API v1.1 started — logging active")
 
 # Health check and info endpoints
 @app.get("/")

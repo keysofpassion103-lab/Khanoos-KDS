@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, status
+import logging
 from app.schemas.license_key import (
     LicenseKeyCreate, LicenseVerifyRequest, LicenseAuthRequest,
-    OutletActivationRequest, OutletUserSignupRequest, OutletUserLoginRequest,
+    OutletActivationRequest, OutletUserLoginRequest,
     OutletAuthRequest,
 )
+
+logger = logging.getLogger(__name__)
 from app.schemas.response import APIResponse
 from app.services.license_service import LicenseService
 from app.auth.dependencies import get_current_admin_user
@@ -65,25 +68,14 @@ async def check_license_key(license_key: str):
 
 
 @router.post("/outlet-signup", response_model=APIResponse, status_code=status.HTTP_201_CREATED)
-async def outlet_user_signup(data: OutletUserSignupRequest):
+async def outlet_user_signup(data: OutletAuthRequest):
     """
     Outlet user signup with license key (Public)
 
-    Delegates to the unified auth flow — handles both new registrations
+    Unified auth flow — handles both new registrations
     and cases where the account already exists (returns token either way).
     """
-
-    if not data.email:
-        from fastapi import HTTPException as _HTTPException
-        raise _HTTPException(status_code=400, detail="Email is required")
-
-    auth_data = OutletAuthRequest(
-        license_key=data.license_key,
-        email=data.email,
-        password=data.password,
-        full_name=data.full_name,
-    )
-    result = await LicenseService.outlet_authenticate(auth_data)
+    result = await LicenseService.outlet_authenticate(data)
 
     return APIResponse(
         success=True,

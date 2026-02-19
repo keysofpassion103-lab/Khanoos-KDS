@@ -14,6 +14,13 @@ async def get_today_kots(current_user: dict = Depends(get_current_outlet_user)):
     return APIResponse(success=True, data=result)
 
 
+@router.get("/served", response_model=APIResponse)
+async def get_served_kots(current_user: dict = Depends(get_current_outlet_user)):
+    """Get today's served KOTs for the current outlet"""
+    result = await KDSKotService.get_served_kots(current_user["outlet_id"])
+    return APIResponse(success=True, data=result)
+
+
 @router.get("/table/{table_id}", response_model=APIResponse)
 async def get_table_kots(
     table_id: str,

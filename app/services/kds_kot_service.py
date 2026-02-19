@@ -138,6 +138,38 @@ class KDSKotService:
             )
 
     @staticmethod
+    async def get_served_kots(outlet_id: str) -> List[Dict]:
+        """Get today's served KOTs for an outlet"""
+        start_utc = _get_ist_start_of_day_utc()
+
+        response = supabase.table("kds_kots").select("*").eq(
+            "outlet_id", outlet_id
+        ).gte(
+            "created_at", start_utc
+        ).eq(
+            "kot_status", "served"
+        ).order("served_at", desc=True).execute()
+
+        kots = response.data
+
+        # Load items and order info for each KOT
+        for kot in kots:
+            # Load KOT items
+            items_response = supabase.table("kds_kot_items").select("*").eq(
+                "kot_id", kot["id"]
+            ).order("created_at").execute()
+            kot["items"] = items_response.data
+
+            # Load order info
+            if kot.get("order_id"):
+                order_response = supabase.table("kds_orders").select("*").eq(
+                    "id", kot["order_id"]
+                ).execute()
+                kot["order"] = order_response.data[0] if order_response.data else None
+
+        return kots
+
+    @staticmethod
     async def update_kot_status(kot_id: str, outlet_id: str, data: KOTStatusUpdate) -> Dict:
         """Update KOT status (scoped to outlet)"""
         update_data = {"kot_status": data.kot_status}

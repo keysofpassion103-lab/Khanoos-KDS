@@ -149,6 +149,12 @@ async def app_check_status(current_user: dict = Depends(get_current_outlet_user)
             "plan_id": outlet.get("plan_id"),
             "plan_start_date": outlet.get("plan_start_date"),
             "plan_end_date": outlet.get("plan_end_date"),
+            "address": outlet.get("address"),
+            "city": outlet.get("city"),
+            "state": outlet.get("state"),
+            "pincode": outlet.get("pincode"),
+            "owner_phone": outlet.get("owner_phone"),
+            "owner_email": outlet.get("owner_email"),
         }
     )
 

@@ -148,3 +148,82 @@ async def get_current_outlet_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def get_current_chain_owner(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """Get current authenticated chain owner by validating Supabase session token"""
+
+    auth_header = request.headers.get("Authorization", "MISSING")
+    logger.info(f"[AUTH] {request.method} {request.url.path} | Authorization: {auth_header[:30] if auth_header != 'MISSING' else 'MISSING'}...")
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated. Please provide a Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = credentials.credentials
+
+    try:
+        auth_client = get_fresh_supabase_client()
+        user_response = auth_client.auth.get_user(token)
+
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user = user_response.user
+        user_id = str(user.id)
+
+        # Verify user_type is chain_owner
+        user_type = user.user_metadata.get("user_type", "") if user.user_metadata else ""
+        if user_type != "chain_owner":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a chain owner account."
+            )
+
+        chain_id = user.user_metadata.get("chain_id") if user.user_metadata else None
+        if not chain_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No chain linked to this account."
+            )
+
+        logger.info(f"[AUTH] Token valid for chain owner: {user_id}, chain: {chain_id}")
+
+        # Verify chain exists
+        db = get_fresh_supabase_client()
+        chain_response = db.table("chain_outlets").select("*").eq("id", chain_id).execute()
+
+        if not chain_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chain not found"
+            )
+
+        chain = chain_response.data[0]
+
+        return {
+            "id": user_id,
+            "email": user.email,
+            "chain_id": chain_id,
+            "chain": chain
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[AUTH] Chain owner token validation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

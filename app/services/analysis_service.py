@@ -159,6 +159,49 @@ class AnalysisService:
 
             if result.data:
                 logger.info(f"Generated analysis: {total_orders} orders, revenue={total_revenue}")
+
+            # Also update cash_sales in kds_cash_balance so the closing_balance
+            # trigger can include cash revenue in its calculation:
+            # closing = opening + cash_sales - deposits - withdrawals
+            if cash_revenue > 0:
+                try:
+                    # Check if a balance record already exists for this date
+                    bal_check = supabase.table("kds_cash_balance").select("id").eq(
+                        "outlet_id", outlet_id
+                    ).eq("balance_date", date_str).maybe_single().execute()
+
+                    if bal_check.data:
+                        # Update existing record — the recalculate_closing_balance
+                        # trigger will auto-recalculate closing_balance
+                        supabase.table("kds_cash_balance").update({
+                            "cash_sales": round(cash_revenue, 2),
+                        }).eq("outlet_id", outlet_id).eq(
+                            "balance_date", date_str
+                        ).execute()
+                    else:
+                        # Get previous day's closing as today's opening
+                        prev = supabase.table("kds_cash_balance").select(
+                            "closing_balance"
+                        ).eq("outlet_id", outlet_id).lt(
+                            "balance_date", date_str
+                        ).order("balance_date", desc=True).limit(1).execute()
+
+                        opening = float(prev.data[0]["closing_balance"]) if prev.data else 0.0
+
+                        supabase.table("kds_cash_balance").insert({
+                            "outlet_id": outlet_id,
+                            "balance_date": date_str,
+                            "opening_balance": opening,
+                            "cash_sales": round(cash_revenue, 2),
+                            "total_deposits": 0,
+                            "total_withdrawals": 0,
+                        }).execute()
+
+                    logger.info(f"Updated cash_sales={cash_revenue} for {date_str}")
+                except Exception as cash_err:
+                    logger.warning(f"Non-critical: failed to update cash_sales in balance: {cash_err}")
+
+            if result.data:
                 return result.data[0]
 
             return analysis_data
@@ -284,4 +327,114 @@ class AnalysisService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to fetch denomination range: {str(e)}"
+            )
+
+    # =========================================================================
+    # CASH TRANSACTIONS
+    # =========================================================================
+
+    @staticmethod
+    async def get_current_cash_balance(outlet_id: str) -> float:
+        """Get current cash balance for outlet"""
+        try:
+            response = supabase.table("kds_cash_balance").select("closing_balance").eq(
+                "outlet_id", outlet_id
+            ).order("balance_date", desc=True).limit(1).execute()
+
+            if response.data:
+                return float(response.data[0].get("closing_balance", 0))
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error fetching cash balance: {e}")
+            return 0.0
+
+    @staticmethod
+    async def record_cash_transaction(outlet_id: str, data) -> Dict:
+        """Record a cash transaction (deposit/withdrawal)"""
+        try:
+            transaction_data = {
+                "outlet_id": outlet_id,
+                "transaction_type": data.transaction_type,
+                "amount": data.amount,
+                "notes": data.notes,
+                "reference_number": data.reference_number,
+                "deposited_to": data.deposited_to,
+                "withdrawn_by": data.withdrawn_by,
+            }
+
+            result = supabase.table("kds_cash_transactions").insert(
+                transaction_data
+            ).execute()
+
+            if result.data:
+                logger.info(f"Recorded {data.transaction_type}: amount={data.amount}")
+                return result.data[0]
+
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to record transaction"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error recording transaction: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to record transaction: {str(e)}"
+            )
+
+    @staticmethod
+    async def get_cash_transactions(
+        outlet_id: str, start_date: str, end_date: str
+    ) -> List[Dict]:
+        """Fetch cash transactions for a date range"""
+        try:
+            start_utc, _ = _to_ist_date_range_utc(start_date)
+            _, end_utc = _to_ist_date_range_utc(end_date)
+
+            response = supabase.table("kds_cash_transactions").select("*").eq(
+                "outlet_id", outlet_id
+            ).gte("transaction_date", start_utc).lte(
+                "transaction_date", end_utc
+            ).order("transaction_date", desc=True).execute()
+
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Error fetching transactions: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch transactions: {str(e)}"
+            )
+
+    @staticmethod
+    async def get_cash_balance(outlet_id: str, date_str: str) -> Optional[Dict]:
+        """Fetch cash balance for a specific date"""
+        try:
+            response = supabase.table("kds_cash_balance").select("*").eq(
+                "outlet_id", outlet_id
+            ).eq("balance_date", date_str).maybe_single().execute()
+
+            return response.data
+        except Exception as e:
+            logger.error(f"Error fetching cash balance: {e}")
+            return None
+
+    @staticmethod
+    async def get_cash_balance_range(
+        outlet_id: str, start_date: str, end_date: str
+    ) -> List[Dict]:
+        """Fetch cash balance records for a date range"""
+        try:
+            response = supabase.table("kds_cash_balance").select("*").eq(
+                "outlet_id", outlet_id
+            ).gte("balance_date", start_date).lte(
+                "balance_date", end_date
+            ).order("balance_date", desc=True).execute()
+
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Error fetching cash balance range: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch cash balance range: {str(e)}"
             )

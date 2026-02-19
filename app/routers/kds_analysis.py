@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query, status
-from app.schemas.analysis import CurrencyDenominationCreate
+from app.schemas.analysis import CurrencyDenominationCreate, CashTransactionCreate
 from app.schemas.response import APIResponse
 from app.services.analysis_service import AnalysisService
 from app.auth.dependencies import get_current_outlet_user
@@ -98,6 +98,75 @@ async def get_denomination_range(
 ):
     """Get currency denominations for a date range"""
     result = await AnalysisService.get_denomination_range(
+        current_user["outlet_id"], start_date, end_date
+    )
+    return APIResponse(success=True, data=result)
+
+
+# =============================================================================
+# CASH TRANSACTION ENDPOINTS
+# =============================================================================
+
+@router.get("/cash/balance", response_model=APIResponse)
+async def get_current_cash_balance(
+    current_user: dict = Depends(get_current_outlet_user),
+):
+    """Get current cash balance for the outlet"""
+    balance = await AnalysisService.get_current_cash_balance(
+        current_user["outlet_id"]
+    )
+    return APIResponse(success=True, data={"balance": balance})
+
+
+@router.get("/cash/balance/date", response_model=APIResponse)
+async def get_cash_balance_for_date(
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    current_user: dict = Depends(get_current_outlet_user),
+):
+    """Get cash balance for a specific date"""
+    result = await AnalysisService.get_cash_balance(
+        current_user["outlet_id"], date
+    )
+    return APIResponse(success=True, data=result)
+
+
+@router.get("/cash/balance/range", response_model=APIResponse)
+async def get_cash_balance_range(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: dict = Depends(get_current_outlet_user),
+):
+    """Get cash balance records for a date range"""
+    result = await AnalysisService.get_cash_balance_range(
+        current_user["outlet_id"], start_date, end_date
+    )
+    return APIResponse(success=True, data=result)
+
+
+@router.post("/cash/transaction", response_model=APIResponse, status_code=status.HTTP_201_CREATED)
+async def record_cash_transaction(
+    data: CashTransactionCreate,
+    current_user: dict = Depends(get_current_outlet_user),
+):
+    """Record a cash transaction (deposit or withdrawal)"""
+    result = await AnalysisService.record_cash_transaction(
+        current_user["outlet_id"], data
+    )
+    return APIResponse(
+        success=True,
+        message=f"Cash {data.transaction_type} recorded successfully",
+        data=result,
+    )
+
+
+@router.get("/cash/transactions", response_model=APIResponse)
+async def get_cash_transactions(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: dict = Depends(get_current_outlet_user),
+):
+    """Get cash transactions for a date range"""
+    result = await AnalysisService.get_cash_transactions(
         current_user["outlet_id"], start_date, end_date
     )
     return APIResponse(success=True, data=result)

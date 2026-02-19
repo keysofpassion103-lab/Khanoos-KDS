@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from datetime import date
 
 
@@ -46,3 +46,13 @@ class CurrencyDenominationCreate(BaseModel):
     coins_5: int = Field(default=0, ge=0)
     coins_2: int = Field(default=0, ge=0)
     coins_1: int = Field(default=0, ge=0)
+
+
+class CashTransactionCreate(BaseModel):
+    """Request model for recording a cash transaction"""
+    transaction_type: Literal['withdrawal', 'deposit', 'opening_balance']
+    amount: float = Field(gt=0)
+    notes: Optional[str] = None
+    reference_number: Optional[str] = None
+    deposited_to: Optional[str] = None  # Bank name for deposits
+    withdrawn_by: Optional[str] = None  # Person name for withdrawals

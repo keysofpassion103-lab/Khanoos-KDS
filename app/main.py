@@ -7,7 +7,7 @@ from app.routers import (
     admin_auth, plan_types, chain_outlets, single_outlets,
     licenses, subscriptions, activity_logs, app_auth,
     kds_menu, kds_orders, kds_kots, kds_sections, kds_inventory,
-    kds_analysis, chain_owner,
+    kds_analysis, chain_owner, public_menu, kds_section_managers,
 )
 import logging
 
@@ -132,6 +132,7 @@ async def root():
             "KDS - Inventory & Recipe management",
             "KDS - Smart Analysis & Currency Denominations",
             "KDS - Cash Transaction Management",
+            "KDS - Section Manager Management",
             "Chain Owner Dashboard",
         ]
     }
@@ -162,9 +163,13 @@ app.include_router(kds_kots.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(kds_sections.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(kds_inventory.router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(kds_analysis.router, prefix=f"/api/{settings.API_VERSION}")
+app.include_router(kds_section_managers.router, prefix=f"/api/{settings.API_VERSION}")
 
 # Chain Owner Dashboard
 app.include_router(chain_owner.router, prefix=f"/api/{settings.API_VERSION}")
+
+# Public Menu Page (no auth, no API prefix — served at /menu/{outlet_id})
+app.include_router(public_menu.router)
 
 # if __name__ == "__main__":
 #     # import uvicorn

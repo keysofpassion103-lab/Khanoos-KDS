@@ -437,6 +437,18 @@ class LicenseService:
                         detail="Your plan has expired. Please contact admin for renewal."
                     )
 
+            # Check section manager active status
+            user_type = user.user_metadata.get("user_type", "outlet_owner") if user.user_metadata else "outlet_owner"
+            if user_type == "section_manager":
+                sm_resp = supabase.table("section_managers").select("is_active").eq(
+                    "user_id", user_id
+                ).eq("outlet_id", outlet_id).execute()
+                if sm_resp.data and not sm_resp.data[0].get("is_active", False):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Your section manager account has been deactivated. Contact the outlet owner."
+                    )
+
             logger.info(f"[SUCCESS] Outlet login for: {data.email}, outlet: {outlet_id}")
 
             return {
@@ -444,7 +456,8 @@ class LicenseService:
                     "id": user_id,
                     "email": user.email,
                     "full_name": user.user_metadata.get("full_name", ""),
-                    "user_type": user.user_metadata.get("user_type", "outlet_owner")
+                    "user_type": user.user_metadata.get("user_type", "outlet_owner"),
+                    "section_id": user.user_metadata.get("section_id"),
                 },
                 "outlet": {
                     "id": outlet["id"],

@@ -131,12 +131,28 @@ async def get_current_outlet_user(
                 detail="Outlet is not active"
             )
 
-        # Return user info with outlet_id
+        user_type = user.user_metadata.get("user_type", "outlet_owner") if user.user_metadata else "outlet_owner"
+        section_id = user.user_metadata.get("section_id") if user.user_metadata else None
+
+        # Check section manager is still active in DB
+        if user_type == "section_manager":
+            sm_resp = supabase.table("section_managers").select("is_active").eq(
+                "user_id", user_id
+            ).eq("outlet_id", outlet_id).execute()
+            if sm_resp.data and not sm_resp.data[0].get("is_active", False):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Section manager account deactivated"
+                )
+
+        # Return user info with outlet_id (+ user_type/section_id for section managers)
         return {
             "id": user_id,
             "email": user.email,
             "outlet_id": outlet_id,
-            "outlet": outlet
+            "outlet": outlet,
+            "user_type": user_type,
+            "section_id": section_id,
         }
 
     except HTTPException:

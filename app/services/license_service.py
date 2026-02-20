@@ -440,7 +440,7 @@ class LicenseService:
             # Check section manager active status
             user_type = user.user_metadata.get("user_type", "outlet_owner") if user.user_metadata else "outlet_owner"
             if user_type == "section_manager":
-                sm_resp = supabase.table("section_managers").select("is_active").eq(
+                sm_resp = db.table("section_managers").select("is_active").eq(
                     "user_id", user_id
                 ).eq("outlet_id", outlet_id).execute()
                 if sm_resp.data and not sm_resp.data[0].get("is_active", False):
